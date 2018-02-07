@@ -12,6 +12,15 @@ void Router::SetDevice(int adevice){
   devices = adevice;
 }
 
+int Router::getSTsize(){
+  int sum = 0;
+  for (auto& i: ST) {
+    sum++;
+	sum += (i.second).nodecount();
+  }
+  return sum;
+}
+
 void Router::SetLocDevices(std::string loc_name, int devices){
   auto itr = LocDevices.find(loc_name);
   if( itr != LocDevices.end() ) {
@@ -25,153 +34,66 @@ void Router::AddDevice(int adddevice){
   devices = devices + adddevice;
 }
 
-// まだ集約の余地がある位置名を一時的に格納する
-void Router::AddtmpST(std::string locname, int router_id){
-  tmpST[locname].push_back(router_id);
-  tmpST[locname].sort();
-  tmpST[locname].unique();
-}
-
-void Router::AddST(std::string locname, int _face){
-  ST[locname].push_back(_face);
-  ST[locname].sort();
-  ST[locname].unique();
-  for (int i = locname.size()-1; i > 0; i--) {
-    ST[locname.substr(0,i)].push_back(0);
-	ST[locname.substr(0,i)].sort();
-	ST[locname.substr(0,i)].unique();
+void Router::AddST(std::string locname,std::string datname,int face){
+  for (int i = 8;i > 0; i--) {
+    ST[locname.substr(0,i)].insert(datname,face);
   }
 }
 
-// void Router::AddedgeST(std::string locname,std::string datname,int face){
-//   for (int i = locname.size(); i > 0; i--) {
-// 	edgeST[locname.substr(0,i)].insert(datname,face);
-//   }
-// }
+void Router::AddST(std::string locname,std::string datname,std::vector<int> faces){
+  ST[locname].insert(datname,faces);
+}
+
+void Router::AddRNST(std::string loc_name, int addID){
+  auto itr = RNST.find(loc_name);
+  if( itr != RNST.end() ) {
+	auto ite = find( itr->second.begin(), itr->second.end(), addID );
+	if( ite == itr->second.end() ) itr->second.push_back(addID);
+  } else {
+	RNST[loc_name].push_back(addID);
+	RNST[loc_name].sort();
+	RNST[loc_name].unique();
+  }
+}
 
 void Router::Aggregation(){
-  //位置名CDの長さ＝高さとなるような木構造を作成
-  std::list<std::string> cdlist;
-
-  for (auto itr = tmpST.begin(); itr != tmpST.end(); ++itr){
-	cdlist.push_back(itr->first);
-	// 自身のSTへtmpSTを入れる
-	for(auto ite = (itr->second).begin() ; ite != (itr->second).end() ; ite ++){
-	  AddST(itr->first,*ite);
+  // STを集約
+  for(unsigned int r = MAX_DIGIT ; r > 0 ; r--){
+	for(auto itr = ST.begin(); itr != ST.end(); ++itr) {
+	  if((itr->first).size() == r){
+		for(auto ite = ((itr->second).dat_list).begin() ; ite != ((itr->second).dat_list).end() ; ++ite){
+		  ST[(itr->first).substr(0,r-1)].insert(ite->first,ite->second);
+		}
+	  }
 	}
   }
-  if(rank == 1) return;
-  cdlist.sort();
-  std::vector<std::string> CDtree[MAX_DIGIT+1];
-  for (auto itr = cdlist.begin(); itr != cdlist.end(); itr++) {
-	std::string cd = *itr;
-	CDtree[cd.size()].push_back(*itr);
-  }
-  
-  for(int r = MAX_DIGIT; r>0 ; r--){
-	for(int i = 0; i < (int)CDtree[r].size() ; i++){
-	  std::string cd = CDtree[r][i]; 
-	  std::list<int> tmplist(tmpST[cd]);
-	  int prefix_count=1;
-	  // プレフィックスが重複している位置名をカウントする
-	  for(int continue_count = 1; i+continue_count < (int)CDtree[r].size() ; continue_count++){
-		std::string  cmpCD = CDtree[r][i+continue_count];
-		if (LPM(cd,cmpCD) == r-1){
-		  prefix_count++;
-		  for (auto itr = tmpST[cmpCD].begin() ; itr != tmpST[cmpCD].end(); itr++){
-			tmplist.push_back(*itr);
-			tmplist.sort();
-			tmplist.unique();
-		  }
+
+  // 上位ルータへSTを渡す
+  for(auto itr = ST.begin() ; itr != ST.end() ; itr++){
+	// 集約できるかどうか判定
+	if((itr->first).length() == AGGREGATION_LENGTH+1){
+	  int same_prefix = 0;
+	  for(auto ag_itr = ST.begin() ; ag_itr != ST.end() ; ag_itr++){
+		if((ag_itr->first).length() == AGGREGATION_LENGTH+1){
+		  if((ag_itr->first).substr(0,AGGREGATION_LENGTH) == (itr->first).substr(0,AGGREGATION_LENGTH)) same_prefix++;
 		}
 	  }
-	  // AGGREGATION_Nよりもprefix_countが大きいならさらに上位で集約できるか調べる
-	  if(prefix_count >= AGGREGATION_N){
-		CDtree[r-1].push_back(cd.substr(0,r-1));
-		i += prefix_count-1;
-		// tmpSTには入れる
-		for(auto itr = tmplist.begin() ; itr != tmplist.end() ; itr ++){
-		  AddtmpST(cd.substr(0,r-1),*itr);
-		}
-	  // これ以上集約できないものに対しての処理
-	  }else{
-		Network::instance().search_router(up_ID)->AddtmpST(cd,ID);
-	  }
-	  std::sort(CDtree[r-1].begin(),CDtree[r-1].end());
-	  CDtree[r-1].erase(std::unique(CDtree[r-1].begin(),CDtree[r-1].end()),CDtree[r-1].end());
+	  // 同じプレフィックスを持つものがAGGREGATION_N以上ならコピーしない
+	  if(same_prefix >= AGGREGATION_N) continue;
+	}
+	for(auto ite = ((itr->second).dat_list).begin() ; ite != ((itr->second).dat_list).end() ; ++ite){
+	  Network::instance().router(up_ID)->AddST(itr->first,ite->first,ite->second);
 	}
   }
 }
-
-// std::tuple<int, int> Router::send_packet(std::string demand){
-//   int mis=0,suc=0;
-//   int r_mis,r_suc;
-//   if (rank == ROUTER_RANK) {
-//     for(auto itr = edgeST.begin() ; itr != edgeST.end() ; ++itr){
-// 	  if(itr->first == demand){
-// 		//		std::cout <<"["<<ID <<"]rank"<<rank<<"hit:"<<demand<<"\n";
-// 		return std::forward_as_tuple(0,1);
-// 	  }
-// 	}
-// 	std::cout <<"["<<ID<< "]rank"<<rank<<"mis:"<<demand<<"\n";
-// 	return std::forward_as_tuple(1,0);
-//   }
-//   for (int loclen = MAX_DIGIT;  loclen >0;--loclen) {
-// 	for(auto itr = ST.begin() ; itr != ST.end() ; itr++){
-// 	  if((itr->first).size() == loclen){
-// 	    if(LPM(itr->first,demand) == loclen){
-// 		  for(auto ite = (itr->second).begin() ; ite != (itr->second).end() ; ++ite){
-// 			if(*ite == 0) continue; // 
-// 			//	std::cout <<"[" <<ID<<"]" <<"rank"<<rank<<"hit:"<<demand.substr(0,loclen) <<",send to["<<*ite <<"]\n";
-// 			router_ptr router = Network::instance().search_router(*ite);
-// 			std::tie(r_mis,r_suc) = router->send_packet(demand);
-// 			mis += r_mis;
-// 			suc += r_suc;
-// 		  }
-// 		  return std::forward_as_tuple(mis,suc);
-// 		}
-// 	  }
-// 	}
-//   }
-//   std::cout <<"["<<ID<< "]rank"<<rank<<"mis:"<<demand<<"\n";
-//   return std::forward_as_tuple(1,0);
-// }
 
 int Router::LPM(std::string a, std::string b)
 {	
-  for (int i = 0; i < MAX_DIGIT; i++) {
-	if (i == (int)a.size() || i == (int)b.size()) return i;
-	if (a[i] != b[i]) return i;
-  }
-  return MAX_DIGIT;
-}
-
-void Router::STprint(std::ofstream &file){
-  file << "===id[" << getID() << "]===" << std::endl;
-  for(int i = 0 ; i < 9 ; i++){
-	for(auto itr = ST.begin() ; itr != ST.end() ; ++itr){
-	  if( i == (int)(itr->first).size() ){
-		file  << itr->first << " : ";
-		for (auto ite = itr->second.begin(); ite != itr->second.end(); ++ite) file << *ite << ",";
-		file << "\n";
-	  }
+	for (int i = 0; i < MAX_DIGIT; i++) {
+	  if (i == (int)a.size() || i == (int)b.size()) return i;
+		if (a[i] != b[i]) return i;
 	}
-  }
-}
-
-void Router::STprint(){
-  std::cout << "===id[" << getID() << "]===" << std::endl;
-  for(int i = 0 ; i < 9 ; i++){
-	for(auto itr = ST.begin() ; itr != ST.end() ; ++itr){
-	  if( i == (int)(itr->first).size() ){
-		std::cout  << itr->first<<":" ;
-		for(auto ite = itr->second.begin(); ite != itr->second.end();ite++){
-		  std::cout << Network::instance().search_router(Network::instance().search_router_position(*ite))->getRank() <<",";
-		}
-		std::cout << "\n";
-	  }
-	}
-  }
+	return MAX_DIGIT;
 }
 
 int Router::Search_Locname_inST(std::string loc_name){
@@ -179,6 +101,53 @@ int Router::Search_Locname_inST(std::string loc_name){
 	if(itr->first == loc_name) return ID;
   }
   return -1;
+}
+
+void Router::Set_RNs(){
+  for(auto itr = ST.begin(); itr != ST.end(); ++itr) {
+	if(itr->first.length() == RN_LOCATION_LENGTH){
+	  for(int i=0 ; i<ROUTER_N ; i++){
+		if(Network::instance().router(i)->getRank() == RN_ROUTER_RANK ){
+		  int search_routerID = Network::instance().router(i)->Search_Locname_inST(itr->first);
+		  if(search_routerID != -1) AddRNST(itr->first,search_routerID);
+		}
+	  }
+	}
+  }
+}
+
+float Router::getHop(){
+  int count_hop = 0;
+  int count_link = 0;
+  for(auto itr = ST.begin(); itr != ST.end(); ++itr) {
+	if(itr->first.length() == RN_LOCATION_LENGTH){
+	  int maxcount2_hop = 0; int maxcount4_hop = 0; int maxcount6_hop = 0;
+	  int tmp_hop = 0; int tmp_link =0;
+	  tmp_hop += CalcDevices(itr->first)*2;
+	  tmp_link += CalcDevices(itr->first);
+	  maxcount2_hop = CalcDevices(itr->first);
+	  auto ite = RNST.find(itr->first);
+	  for(auto it = ite->second.begin() ; it != ite->second.end() ; ++it){
+		if(*it == ID) continue;
+		int near_router = Search_Router(*it);
+		int near_router_upID = Network::instance().router(near_router)->getUpID();
+		if(near_router_upID == up_ID){
+		  tmp_hop += Network::instance().router(near_router)->CalcDevices(itr->first)*4;
+		  tmp_link += Network::instance().router(near_router)->CalcDevices(itr->first);
+		  maxcount4_hop = std::max(Network::instance().router(near_router)->CalcDevices(itr->first),maxcount4_hop);
+		}else{
+		  tmp_hop += Network::instance().router(near_router)->CalcDevices(itr->first)*6;
+		  tmp_link += Network::instance().router(near_router)->CalcDevices(itr->first);
+		  maxcount6_hop = std::max(Network::instance().router(near_router)->CalcDevices(itr->first),maxcount6_hop);
+		}
+	  }
+	  if(maxcount2_hop >=  maxcount4_hop && maxcount2_hop >= maxcount6_hop){
+		count_hop += tmp_hop;
+		count_link += tmp_link;
+	  }  
+	}
+  }
+  return (float) count_hop / count_link;
 }
 
 int Router::Search_Router(int aID){
@@ -199,18 +168,3 @@ int Router::CalcDevices(std::string loc_name){
   return devices_sum;
 }
 
-int Router::leafNode(){
-  int i=0;
-  for(auto node : ST){
-    if(node.first.length() == 8) i++;
-  }
-  return i;
-}
-
-// int Router::getdataSTsize(){
-//   int datanode_count=0;
-//   for(auto itr = edgeST.begin(); itr != edgeST.end(); ++itr) {
-// 	datanode_count += (itr->second).nodecount();
-//   }
-//   return datanode_count;
-// }

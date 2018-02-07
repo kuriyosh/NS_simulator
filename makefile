@@ -1,4 +1,4 @@
-PACKAGE = simulator_ZORDER
+PACKAGE = simulator
 
 CXX=g++
 CXXFLAGS=-O3 -std=c++11 -Wall
@@ -7,7 +7,7 @@ SRCDIR := ./src
 RSLDIR := ./result
 OBJDIR := ./obj
 
-BINNAME := $(PACKAGE).out
+BINNAME := $(PACKAGE)
 TARGET	:= $(BINNAME)
 
 SOURCES := $(wildcard $(SRCDIR)/*.cpp) 

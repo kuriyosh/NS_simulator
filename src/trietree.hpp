@@ -17,9 +17,8 @@ public:
   TrieTreeNode * parent;
   std::vector<int> face_num;
   std::string node_data;
-  int child=0;
   void addface(int _face);
-  int nodecount();
+  int nodecount() const;
 };
 
 class TrieTree{
@@ -29,9 +28,9 @@ public:
   TrieTree() {
 	root = (TrieTreeNode *) calloc(1, sizeof(TrieTreeNode));
   }
+  int nodecount(){return root->nodecount();}
   void insert(std::string text,int _face);
   void insert(std::string text,std::vector<int> _faces);
-  int nodecount();
   TrieTreeNode * searchData(TrieTreeNode * trie_tree, std::string text);
   
 };
